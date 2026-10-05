@@ -2,7 +2,7 @@
 {
   "name": "Reception Monthly Report",
   "schemaVersion": 1,
-  "description": "Monthly reception team report: RingCentral per-receptionist inbound calls, avg calls/day, and handle time with color scale, RingCentral & Alert monthly totals, 16 months of history (Jun 2025–Sep 2026), a separate Backup Team section from Sep 2026 onward, and trend chart. Updated on the 2nd of each month by the scheduled task."
+  "description": "Monthly reception team report: RingCentral per-receptionist inbound calls, avg calls/day, prior-month comparison, and handle time with color scale, RingCentral & Alert monthly totals, 16 months of history (Jun 2025–Sep 2026), a separate Backup Team section from Sep 2026 onward (counted in the in-house % alongside the primary team), and trend chart. Updated on the 2nd of each month by the scheduled task."
 }
 </script>
 <html lang="en">
@@ -58,7 +58,7 @@ footer { font-size: 11px; color: #98a1ad; text-align: center; padding: 8px 0 20p
 <section>
   <h2 id="tableTitle">Individual Performance</h2>
   <table id="perfTable">
-    <thead><tr><th>Name</th><th class="num"># Inbound</th><th class="num">Avg. Calls/Day</th><th class="num">Avg. Handle Time</th></tr></thead>
+    <thead><tr><th>Name</th><th class="num"># Inbound</th><th class="num">Prev. Month</th><th class="num">Avg. Calls/Day</th><th class="num">Avg. Handle Time</th></tr></thead>
     <tbody></tbody>
   </table>
   <div class="legend-scale">
@@ -67,13 +67,13 @@ footer { font-size: 11px; color: #98a1ad; text-align: center; padding: 8px 0 20p
     <span class="sw" style="background:#ffd666"></span> median
     <span class="sw" style="background:#57bb8a"></span> high
   </div>
-  <div class="note">RingCentral totals: # Inbound = sum of all receptionists &middot; Avg. Calls/Day = total inbound &divide; days in month &middot; AHT = average of individual handle times. Alert Avg. Calls/Day = Alert inbound &divide; days in month.</div>
+  <div class="note">RingCentral totals: # Inbound = sum of all receptionists &middot; Avg. Calls/Day = total inbound &divide; days in month &middot; AHT = average of individual handle times. Alert Avg. Calls/Day = Alert inbound &divide; days in month. Prev. Month shows that person's # Inbound the month before (&mdash; if no data or they weren't active that month).</div>
 </section>
 
 <section id="backupSection" hidden>
   <h2 id="backupTableTitle">Backup Team Performance</h2>
   <table id="backupTable">
-    <thead><tr><th>Name</th><th class="num"># Inbound</th><th class="num">Avg. Calls/Day</th><th class="num">Avg. Handle Time</th></tr></thead>
+    <thead><tr><th>Name</th><th class="num"># Inbound</th><th class="num">Prev. Month</th><th class="num">Avg. Calls/Day</th><th class="num">Avg. Handle Time</th></tr></thead>
     <tbody></tbody>
   </table>
   <div class="note">Backup receptionists cover overflow and are tracked separately from the primary Reception Team's totals above. Starting September 2026, Kayla Carrillo, Karen Ramirez, and Cynthia Gonzalez are tracked here rather than in the primary team's totals.</div>
@@ -123,9 +123,25 @@ function scaleColor(v, vals){ // Google-Sheets-style 3-color scale: min -> media
 function textColor(bg){ const r=parseInt(bg.slice(1,3),16),g=parseInt(bg.slice(3,5),16),b=parseInt(bg.slice(5,7),16); return (r*.299+g*.587+b*.114)>150 ? '#1a2233' : '#fff'; }
 const fmtN = n => n.toLocaleString('en-US');
 
+function prevMonthKey(key){
+  const [y,mo] = key.split('-').map(Number);
+  const d = new Date(y, mo-2, 1); // mo is 1-indexed; -2 steps back one month
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function findPrevUser(prevM, name){
+  if(!prevM) return null;
+  const all = [...(prevM.users||[]), ...(prevM.backupUsers||[])];
+  return all.find(u=>u.name===name) || null;
+}
+function prevCell(prevVal){
+  return prevVal==null ? `<td class="num" style="color:#98a1ad">—</td>` : `<td class="num" style="color:#6b7686">${fmtN(prevVal)}</td>`;
+}
+
 function render(){
   const m = months.find(x=>x.key===sel.value);
-  const alertPct = (m.alert.inbound / (m.rcTotal.inbound + m.alert.inbound) * 100);
+  const inHouseTotal = m.rcTotal.inbound + (m.backupTotal ? m.backupTotal.inbound : 0);
+  const alertPct = (m.alert.inbound / (inHouseTotal + m.alert.inbound) * 100);
+  const prevM = MONTHLY_DATA.find(x=>x.key===prevMonthKey(m.key));
   // KPI cards
   document.getElementById('cards').innerHTML = `
     <div class="card rc-card"><div class="lbl">Team Inbound Calls</div><div class="val">${fmtN(m.rcTotal.inbound)}</div><div class="sub">${m.label}</div></div>
@@ -139,22 +155,24 @@ function render(){
   const inb = m.users.map(u=>u.inbound), avg = m.users.map(u=>u.avgDay);
   m.users.forEach(u=>{
     const c1=scaleColor(u.inbound,inb), c2=scaleColor(u.avgDay,avg);
+    const pu = findPrevUser(prevM, u.name);
     const tr=document.createElement('tr');
     tr.innerHTML = `<td>${u.name}</td>
       <td class="num cell-scale" style="background:${c1};color:${textColor(c1)}">${fmtN(u.inbound)}</td>
+      ${prevCell(pu?pu.inbound:null)}
       <td class="num cell-scale" style="background:${c2};color:${textColor(c2)}">${u.avgDay}</td>
       <td class="num">${u.aht}${u.ahtRaw?' *':''}</td>`;
     tb.appendChild(tr);
   });
   const trT=document.createElement('tr'); trT.className='total';
-  trT.innerHTML = `<td>RingCentral Monthly Totals</td><td class="num">${fmtN(m.rcTotal.inbound)}</td><td class="num">${m.rcTotal.avgDay}</td><td class="num">${m.rcTotal.aht ?? '—'}</td>`;
+  trT.innerHTML = `<td>RingCentral Monthly Totals</td><td class="num">${fmtN(m.rcTotal.inbound)}</td>${prevCell(prevM?prevM.rcTotal.inbound:null)}<td class="num">${m.rcTotal.avgDay}</td><td class="num">${m.rcTotal.aht ?? '—'}</td>`;
   tb.appendChild(trT);
   const trA=document.createElement('tr'); trA.className='alert-row';
-  trA.innerHTML = `<td>Alert Monthly Totals</td><td class="num">${fmtN(m.alert.inbound)}</td><td class="num">${m.alert.avgDay}</td><td class="num">N/A</td>`;
+  trA.innerHTML = `<td>Alert Monthly Totals</td><td class="num">${fmtN(m.alert.inbound)}</td>${prevCell(prevM?prevM.alert.inbound:null)}<td class="num">${m.alert.avgDay}</td><td class="num">N/A</td>`;
   tb.appendChild(trA);
   if(m.users.some(u=>u.ahtRaw)){
     const n=document.createElement('tr');
-    n.innerHTML=`<td colspan="4" style="font-size:11px;color:#98a1ad;border-bottom:none">* value kept exactly as entered in the original sheet</td>`;
+    n.innerHTML=`<td colspan="5" style="font-size:11px;color:#98a1ad;border-bottom:none">* value kept exactly as entered in the original sheet</td>`;
     tb.appendChild(n);
   }
   // backup team section (present from September 2026 onward)
@@ -166,16 +184,18 @@ function render(){
     const binb = m.backupUsers.map(u=>u.inbound), bavg = m.backupUsers.map(u=>u.avgDay);
     m.backupUsers.forEach(u=>{
       const c1=scaleColor(u.inbound,binb), c2=scaleColor(u.avgDay,bavg);
+      const pu = findPrevUser(prevM, u.name);
       const tr=document.createElement('tr');
       tr.innerHTML = `<td>${u.name}</td>
         <td class="num cell-scale" style="background:${c1};color:${textColor(c1)}">${fmtN(u.inbound)}</td>
+        ${prevCell(pu?pu.inbound:null)}
         <td class="num cell-scale" style="background:${c2};color:${textColor(c2)}">${u.avgDay}</td>
         <td class="num">${u.aht}${u.ahtRaw?' *':''}</td>`;
       btb.appendChild(tr);
     });
     if(m.backupTotal){
       const trB=document.createElement('tr'); trB.className='backup-total';
-      trB.innerHTML = `<td>Backup Team Totals</td><td class="num">${fmtN(m.backupTotal.inbound)}</td><td class="num">${m.backupTotal.avgDay}</td><td class="num">${m.backupTotal.aht ?? '—'}</td>`;
+      trB.innerHTML = `<td>Backup Team Totals</td><td class="num">${fmtN(m.backupTotal.inbound)}</td>${prevCell(prevM&&prevM.backupTotal?prevM.backupTotal.inbound:null)}<td class="num">${m.backupTotal.avgDay}</td><td class="num">${m.backupTotal.aht ?? '—'}</td>`;
       btb.appendChild(trB);
     }
   } else {
@@ -187,7 +207,8 @@ function render(){
 (function(){
   const tb=document.querySelector('#histTable tbody');
   [...months].forEach(m=>{
-    const pct=(m.alert.inbound/(m.rcTotal.inbound+m.alert.inbound)*100).toFixed(1);
+    const inHouseTotal = m.rcTotal.inbound + (m.backupTotal ? m.backupTotal.inbound : 0);
+    const pct=(m.alert.inbound/(inHouseTotal+m.alert.inbound)*100).toFixed(1);
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${m.label}</td><td class="num">${fmtN(m.rcTotal.inbound)}</td><td class="num">${m.rcTotal.avgDay}</td><td class="num">${m.rcTotal.aht ?? '—'}</td><td class="num">${fmtN(m.alert.inbound)}</td><td class="num">${m.alert.avgDay}</td><td class="num">${pct}%</td>`;
     tb.appendChild(tr);
